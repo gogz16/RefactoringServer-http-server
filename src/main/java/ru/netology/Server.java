@@ -20,9 +20,9 @@ public class Server {
     }
 
     public void start(int port) {
-        try (final var serverSocket = new ServerSocket(port)) {
+        try (var serverSocket = new ServerSocket(port)) {
             while (true) {
-                final var socket = serverSocket.accept();
+                var socket = serverSocket.accept();
                 threadPool.submit(() -> handleConnection(socket));
             }
         } catch (IOException e) {
@@ -33,18 +33,38 @@ public class Server {
     private void handleConnection(Socket socket) {
         try (
                 socket;
-                final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                final var out = new BufferedOutputStream(socket.getOutputStream());
+                var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                var out = new BufferedOutputStream(socket.getOutputStream())
         ) {
-            // read only request line for simplicity
-            // must be in form GET /path HTTP/1.1
-            final var requestLine = in.readLine();
+            // 1. Читаем request line
+            String requestLine = in.readLine();
             if (requestLine == null) return;
 
-            final var parts = requestLine.split(" ");
-            if (parts.length != 3) return;
+            // 2. Создаём Request
+            Request request = new Request(requestLine);
+            String method = request.getMethod();
+            String path = request.getPath();
 
-            final var path = parts[1];
+            // 3. Читаем заголовки
+            String line;
+            int contentLength = 0;
+            while (!(line = in.readLine()).isEmpty()) {
+                // System.out.println("Header: " + line);
+                if (line.toLowerCase().startsWith("content-length:")) {
+                    contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                }
+            }
+
+            // 4. Если POST, читаем тело запроса
+            if (method.equals("POST")) {
+                char[] body = new char[contentLength];
+                int read = in.read(body);
+                String bodyString = new String(body, 0, read);
+                System.out.println("POST body:\n" + bodyString);
+                // Здесь можно добавить парсинг multipart или form-data, если нужно
+            }
+
+            // Проверка пути
             if (!validPaths.contains(path)) {
                 out.write((
                         "HTTP/1.1 404 Not Found\r\n" +
@@ -56,13 +76,12 @@ public class Server {
                 return;
             }
 
-            final var filePath = Path.of(".", "public", path);
-            final var mimeType = Files.probeContentType(filePath);
+            Path filePath = Path.of(".", "public", path);
+            String mimeType = Files.probeContentType(filePath);
 
-            // special case for classic
             if (path.equals("/classic.html")) {
-                final var template = Files.readString(filePath);
-                final var content = template.replace(
+                var template = Files.readString(filePath);
+                var content = template.replace(
                         "{time}",
                         LocalDateTime.now().toString()
                 ).getBytes();
@@ -78,7 +97,7 @@ public class Server {
                 return;
             }
 
-            final var length = Files.size(filePath);
+            long length = Files.size(filePath);
             out.write((
                     "HTTP/1.1 200 OK\r\n" +
                             "Content-Type: " + mimeType + "\r\n" +
